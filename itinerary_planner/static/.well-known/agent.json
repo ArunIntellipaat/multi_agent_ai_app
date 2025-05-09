@@ -1,0 +1,59 @@
+{
+    "name": "Itinerary Planner Agent",
+    "displayName": "Travel Itinerary Planner Agent",
+    "description": "This agent coordinates flight and hotel search to create comprehensive travel itineraries.",
+    "version": "1.0.0",
+    "contact": "code.aicloudlab@gmail.com",
+    "endpointUrl": "http://localhost:8005",
+    "authentication": {
+      "type": "none"
+    },
+    "capabilities": [
+      "streaming"
+    ],
+    "skills": [
+      {
+        "name": "createItinerary",
+        "description": "Create a comprehensive travel itinerary including flights and accommodations.",
+        "inputs": [
+          {
+            "name": "origin",
+            "type": "string",
+            "description": "Origin city or airport code."
+          },
+          {
+            "name": "destination",
+            "type": "string",
+            "description": "Destination city or area."
+          },
+          {
+            "name": "departureDate",
+            "type": "string",
+            "description": "Departure date in YYYY-MM-DD format."
+          },
+          {
+            "name": "returnDate",
+            "type": "string",
+            "description": "Return date in YYYY-MM-DD format (optional)."
+          },
+          {
+            "name": "travelers",
+            "type": "integer",
+            "description": "Number of travelers."
+          },
+          {
+            "name": "preferences",
+            "type": "object",
+            "description": "Additional preferences like budget, hotel amenities, etc."
+          }
+        ],
+        "outputs": [
+          {
+            "name": "itinerary",
+            "type": "object",
+            "description": "Complete travel itinerary with flights, hotels, and schedule."
+          }
+        ]
+      }
+    ]
+  }

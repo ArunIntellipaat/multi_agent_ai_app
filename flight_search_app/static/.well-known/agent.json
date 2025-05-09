@@ -1,0 +1,20 @@
+{
+    "name": "Flight Search Agent (A2A)",
+    "description": "Provides flight information based on user queries.",
+    "url": "http://localhost:8000/",
+    "version": "1.0.0",
+    "defaultInputModes": ["text"],
+    "defaultOutputModes": ["text"],
+    "capabilities": {
+      "streaming": false
+    },
+    "skills": [
+      {
+        "id": "search_flights",
+        "name": "Search Flights",
+        "description": "Searches for flights based on origin, destination, and date.",
+        "tags": ["flights", "travel"],
+        "examples": ["Find flights from JFK to LAX tomorrow"]
+      }
+    ]
+  }  
