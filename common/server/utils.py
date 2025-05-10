@@ -1,6 +1,6 @@
 from common.types import (
     ContentTypeNotSupportedError,
-    JsonRpcResponse,
+    JSONRPCResponse,
     UnsupportedOperationError,
 )
 

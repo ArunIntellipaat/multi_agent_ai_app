@@ -3,6 +3,28 @@ This repo deals with deploying Multi-Agent AI App with Google’s A2A (Agent2Age
 
 Navigate to root directory and run the below command by opening separate WSL terminal
 
+# Run the below commands
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install dependencies
+pip install --upgrade pip
+pip install fastapi uvicorn streamlit httpx python-dotenv pydantic
+pip install google-generativeai google-adk langchain langchain-openai
+
+# Install MCP Server Packages
+pip install mcp-hotel-search
+pip install mcp-flight-search
+pip install langchain_mcp_adapters
+
+# Configure Environment Variables
+vi .env
+
+# paste the below content
+GOOGLE_API_KEY=your_google_api_key
+OPENAI_API_KEY=your_openai_api_key
+SERP_API_KEY=your_serp_api_key
+
 # Start Flight Search Agent - 1 Port 8000 
 python3 -m flight_search_app.main
 

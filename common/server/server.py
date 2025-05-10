@@ -1,15 +1,16 @@
 import json
 import logging
+
 from collections.abc import AsyncIterable
 from typing import Any
 
-from fastapi import APIRouter, FastAPI, HTTPException
 from pydantic import ValidationError
 from sse_starlette.sse import EventSourceResponse
+from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from common.server.task_manager import TaskManager, InMemoryTaskManager
+from common.server.task_manager import TaskManager
 from common.types import (
     A2ARequest,
     AgentCard,
@@ -21,11 +22,11 @@ from common.types import (
     JSONParseError,
     JSONRPCResponse,
     SendTaskRequest,
-    SendTaskResponse,
     SendTaskStreamingRequest,
     SetTaskPushNotificationRequest,
     TaskResubscriptionRequest,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -37,35 +38,20 @@ class A2AServer:
         port=5000,
         endpoint='/',
         agent_card: AgentCard = None,
-        task_manager: InMemoryTaskManager = None,
+        task_manager: TaskManager = None,
     ):
         self.host = host
         self.port = port
         self.endpoint = endpoint
         self.task_manager = task_manager
         self.agent_card = agent_card
-
-        self.app = FastAPI()
-        self.router = APIRouter()
-
-        self.app.add_api_route(
+        self.app = Starlette()
+        self.app.add_route(
             self.endpoint, self._process_request, methods=['POST']
         )
-        self.app.add_api_route(
+        self.app.add_route(
             '/.well-known/agent.json', self._get_agent_card, methods=['GET']
         )
-
-        self.register_routes()
-        self.app.include_router(self.router, prefix="")  # mount custom routes
-
-    def register_routes(self):
-        @self.router.post("/v1/tasks/send", response_model=SendTaskResponse)
-        async def send_task(request: SendTaskRequest):
-            try:
-                self.task_manager.on_send_task(request)
-                return await self.task_manager.send_task(request)
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
 
     def start(self):
         if self.agent_card is None:
@@ -75,6 +61,7 @@ class A2AServer:
             raise ValueError('request_handler is not defined')
 
         import uvicorn
+
         uvicorn.run(self.app, host=self.host, port=self.port)
 
     def _get_agent_card(self, request: Request) -> JSONResponse:
@@ -138,13 +125,13 @@ class A2AServer:
         self, result: Any
     ) -> JSONResponse | EventSourceResponse:
         if isinstance(result, AsyncIterable):
+
             async def event_generator(result) -> AsyncIterable[dict[str, str]]:
                 async for item in result:
                     yield {'data': item.model_dump_json(exclude_none=True)}
-            return EventSourceResponse(event_generator(result))
 
+            return EventSourceResponse(event_generator(result))
         if isinstance(result, JSONRPCResponse):
             return JSONResponse(result.model_dump(exclude_none=True))
-
         logger.error(f'Unexpected result type: {type(result)}')
         raise ValueError(f'Unexpected result type: {type(result)}')

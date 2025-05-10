@@ -15,7 +15,7 @@ from common.types import (
     GetTaskResponse,
     InternalError,
     JSONRPCError,
-    JsonRpcResponse,
+    JSONRPCResponse,
     PushNotificationConfig,
     SendTaskRequest,
     SendTaskResponse,
@@ -58,7 +58,7 @@ class TaskManager(ABC):
     @abstractmethod
     async def on_send_task_subscribe(
         self, request: SendTaskStreamingRequest
-    ) -> AsyncIterable[SendTaskStreamingResponse] | JsonRpcResponse:
+    ) -> AsyncIterable[SendTaskStreamingResponse] | JSONRPCResponse:
         pass
 
     @abstractmethod
@@ -76,7 +76,7 @@ class TaskManager(ABC):
     @abstractmethod
     async def on_resubscribe_to_task(
         self, request: TaskResubscriptionRequest
-    ) -> AsyncIterable[SendTaskResponse] | JsonRpcResponse:
+    ) -> AsyncIterable[SendTaskResponse] | JSONRPCResponse:
         pass
 
 
@@ -125,7 +125,7 @@ class InMemoryTaskManager(TaskManager):
     @abstractmethod
     async def on_send_task_subscribe(
         self, request: SendTaskStreamingRequest
-    ) -> AsyncIterable[SendTaskStreamingResponse] | JsonRpcResponse:
+    ) -> AsyncIterable[SendTaskStreamingResponse] | JSONRPCResponse:
         pass
 
     async def set_push_notification_info(
@@ -167,7 +167,7 @@ class InMemoryTaskManager(TaskManager):
             )
         except Exception as e:
             logger.error(f'Error while setting push notification info: {e}')
-            return JsonRpcResponse(
+            return JSONRPCResponse(
                 id=request.id,
                 error=InternalError(
                     message='An error occurred while setting push notification info'
@@ -224,7 +224,7 @@ class InMemoryTaskManager(TaskManager):
 
     async def on_resubscribe_to_task(
         self, request: TaskResubscriptionRequest
-    ) -> AsyncIterable[SendTaskStreamingResponse] | JsonRpcResponse:
+    ) -> AsyncIterable[SendTaskStreamingResponse] | JSONRPCResponse:
         return new_not_implemented_error(request.id)
 
     async def update_store(
@@ -282,7 +282,7 @@ class InMemoryTaskManager(TaskManager):
 
     async def dequeue_events_for_sse(
         self, request_id, task_id, sse_event_queue: asyncio.Queue
-    ) -> AsyncIterable[SendTaskStreamingResponse] | JsonRpcResponse:
+    ) -> AsyncIterable[SendTaskStreamingResponse] | JSONRPCResponse:
         try:
             while True:
                 event = await sse_event_queue.get()

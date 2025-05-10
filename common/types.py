@@ -1,271 +1,372 @@
-from __future__ import annotations
-from typing import Annotated, Literal, Union
-from pydantic import BaseModel, Field, model_validator
 from datetime import datetime
 from enum import Enum
+from typing import Annotated, Any, Literal, Self
+from uuid import uuid4
 
-# ------------------------------
-# Enums
-# ------------------------------
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    field_serializer,
+    model_validator,
+)
 
-class TaskMode(str, Enum):
-    STANDARD = 'standard'
-    STREAMING = 'streaming'
 
-
-class TaskStatus(str, Enum):
-    NOT_STARTED = 'not_started'
-    IN_PROGRESS = 'in_progress'
+class TaskState(str, Enum):
+    SUBMITTED = 'submitted'
+    WORKING = 'working'
+    INPUT_REQUIRED = 'input-required'
     COMPLETED = 'completed'
-    FAILED = 'failed'
     CANCELED = 'canceled'
+    FAILED = 'failed'
+    UNKNOWN = 'unknown'
 
 
-# ------------------------------
-# Core Models
-# ------------------------------
+class TextPart(BaseModel):
+    type: Literal['text'] = 'text'
+    text: str
+    metadata: dict[str, Any] | None = None
+
+
+class FileContent(BaseModel):
+    name: str | None = None
+    mimeType: str | None = None
+    bytes: str | None = None
+    uri: str | None = None
+
+    @model_validator(mode='after')
+    def check_content(self) -> Self:
+        if not (self.bytes or self.uri):
+            raise ValueError(
+                "Either 'bytes' or 'uri' must be present in the file data"
+            )
+        if self.bytes and self.uri:
+            raise ValueError(
+                "Only one of 'bytes' or 'uri' can be present in the file data"
+            )
+        return self
+
+
+class FilePart(BaseModel):
+    type: Literal['file'] = 'file'
+    file: FileContent
+    metadata: dict[str, Any] | None = None
+
+
+class DataPart(BaseModel):
+    type: Literal['data'] = 'data'
+    data: dict[str, Any]
+    metadata: dict[str, Any] | None = None
+
+
+Part = Annotated[TextPart | FilePart | DataPart, Field(discriminator='type')]
+
+
+class Message(BaseModel):
+    role: Literal['user', 'agent']
+    parts: list[Part]
+    metadata: dict[str, Any] | None = None
+
+
+class TaskStatus(BaseModel):
+    state: TaskState
+    message: Message | None = None
+    timestamp: datetime = Field(default_factory=datetime.now)
+
+    @field_serializer('timestamp')
+    def serialize_dt(self, dt: datetime, _info):
+        return dt.isoformat()
+
+
+class Artifact(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    parts: list[Part]
+    metadata: dict[str, Any] | None = None
+    index: int = 0
+    append: bool | None = None
+    lastChunk: bool | None = None
+
+
+class Task(BaseModel):
+    id: str
+    sessionId: str | None = None
+    status: TaskStatus
+    artifacts: list[Artifact] | None = None
+    history: list[Message] | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class TaskStatusUpdateEvent(BaseModel):
+    id: str
+    status: TaskStatus
+    final: bool = False
+    metadata: dict[str, Any] | None = None
+
+
+class TaskArtifactUpdateEvent(BaseModel):
+    id: str
+    artifact: Artifact
+    metadata: dict[str, Any] | None = None
+
+
+class AuthenticationInfo(BaseModel):
+    model_config = ConfigDict(extra='allow')
+
+    schemes: list[str]
+    credentials: str | None = None
+
+
+class PushNotificationConfig(BaseModel):
+    url: str
+    token: str | None = None
+    authentication: AuthenticationInfo | None = None
+
+
+class TaskIdParams(BaseModel):
+    id: str
+    metadata: dict[str, Any] | None = None
+
+
+class TaskQueryParams(TaskIdParams):
+    historyLength: int | None = None
+
 
 class TaskSendParams(BaseModel):
     id: str
-    sessionId: str
-    message: str  # or more specific type depending on your context
-
-class TaskQueryParams(BaseModel):
-    id: str
+    sessionId: str = Field(default_factory=lambda: uuid4().hex)
+    message: Message
+    acceptedOutputModes: list[str] | None = None
+    pushNotification: PushNotificationConfig | None = None
     historyLength: int | None = None
+    metadata: dict[str, Any] | None = None
 
-class TaskIdParams(BaseModel):
-    task_id: str
-    
-class Output(BaseModel):
-    name: str
-    value: str
-
-class Artifact(BaseModel):
-    name: str
-    path: str
-
-class PushNotificationConfig(BaseModel):
-    acceptedOutputModes: list[str]
 
 class TaskPushNotificationConfig(BaseModel):
     id: str
     pushNotificationConfig: PushNotificationConfig
 
-class SendTaskStreamingResponse(BaseModel):
-    message: str
-    isFinal: bool = False
 
-# ------------------------------
-# Task Models
-# ------------------------------
-
-class Task(BaseModel):
-    taskId: str
-    name: str
-    inputs: list[Output] = Field(default_factory=list)
-    outputs: list[Output] = Field(default_factory=list)
-    status: TaskStatus
-    logs: list[str] = Field(default_factory=list)
-    artifacts: list[Artifact] = Field(default_factory=list)
+## RPC Messages
 
 
-class TaskUpdate(BaseModel):
-    taskId: str
-    outputs: list[Output] = Field(default_factory=list)
-    status: TaskStatus | None = None
-    logs: list[str] = Field(default_factory=list)
+class JSONRPCMessage(BaseModel):
+    jsonrpc: Literal['2.0'] = '2.0'
+    id: int | str | None = Field(default_factory=lambda: uuid4().hex)
 
 
-class TaskArtifactUpdate(BaseModel):
-    taskId: str
-    artifacts: list[Artifact] = Field(default_factory=list)
-
-
-# ------------------------------
-# JSON-RPC Base Classes
-# ------------------------------
-
-class JsonRpcRequest(BaseModel):
-    jsonrpc: Literal['2.0']
+class JSONRPCRequest(JSONRPCMessage):
     method: str
-    id: str
-    sessionId: str | None = Field(default=None)
-
-    @model_validator(mode='before')
-    @classmethod
-    def set_defaults(cls, data):
-        data['jsonrpc'] = '2.0'
-        return data
+    params: dict[str, Any] | None = None
 
 
-class JsonRpcResponse(BaseModel):
-    jsonrpc: Literal['2.0'] = Field(default='2.0')
-    id: str
-
-
-class JsonRpcError(BaseModel):
+class JSONRPCError(BaseModel):
     code: int
     message: str
-    data: dict | None = Field(default=None)
+    data: Any | None = None
 
 
-# ------------------------------
-# Specific Request Models
-# ------------------------------
+class JSONRPCResponse(JSONRPCMessage):
+    result: Any | None = None
+    error: JSONRPCError | None = None
 
-class CancelTaskResponse(JsonRpcResponse):
+
+class SendTaskRequest(JSONRPCRequest):
+    method: Literal['tasks/send'] = 'tasks/send'
+    params: TaskSendParams
+
+
+class SendTaskResponse(JSONRPCResponse):
     result: Task | None = None
-    error: JsonRpcError | None = None
-
-class SendTaskResponse(JsonRpcResponse):
-    result: Task
-    error: JsonRpcError | None = None
-
-class SetTaskPushNotificationResponse(JsonRpcResponse):
-    result: TaskPushNotificationConfig
-    error: JsonRpcError | None = None
-
-class SendTaskRequest(JsonRpcRequest):
-    method: Literal['sendTask']
-    task: Task
-    mode: TaskMode = Field(default=TaskMode.STANDARD)
 
 
-class SendTaskStreamingRequest(JsonRpcRequest):
-    method: Literal['sendTaskStreaming']
-    task: Task
+class SendTaskStreamingRequest(JSONRPCRequest):
+    method: Literal['tasks/sendSubscribe'] = 'tasks/sendSubscribe'
+    params: TaskSendParams
 
 
-class GetTaskRequest(JsonRpcRequest):
-    method: Literal['getTask']
-    taskId: str
+class SendTaskStreamingResponse(JSONRPCResponse):
+    result: TaskStatusUpdateEvent | TaskArtifactUpdateEvent | None = None
 
 
-class CancelTaskRequest(JsonRpcRequest):
-    method: Literal['cancelTask']
-    taskId: str
+class GetTaskRequest(JSONRPCRequest):
+    method: Literal['tasks/get'] = 'tasks/get'
+    params: TaskQueryParams
 
 
-class SetTaskPushNotificationRequest(JsonRpcRequest):
-    method: Literal['setTaskPushNotification']
-    acceptedOutputModes: list[str]
+class GetTaskResponse(JSONRPCResponse):
+    result: Task | None = None
 
 
-class GetTaskPushNotificationRequest(JsonRpcRequest):
-    method: Literal['getTaskPushNotification']
+class CancelTaskRequest(JSONRPCRequest):
+    method: Literal['tasks/cancel',] = 'tasks/cancel'
+    params: TaskIdParams
 
 
-class TaskResubscriptionRequest(JsonRpcRequest):
-    method: Literal['taskResubscription']
+class CancelTaskResponse(JSONRPCResponse):
+    result: Task | None = None
 
 
-# ------------------------------
-# Specific Response Models
-# ------------------------------
-
-class GetTaskResponse(JsonRpcResponse):
-    result: Task
-
-
-class GetTaskPushNotificationResponse(JsonRpcResponse):
-    result: list[str]
+class SetTaskPushNotificationRequest(JSONRPCRequest):
+    method: Literal['tasks/pushNotification/set',] = (
+        'tasks/pushNotification/set'
+    )
+    params: TaskPushNotificationConfig
 
 
-# ------------------------------
-# Error Response
-# ------------------------------
-
-class JsonRpcErrorResponse(JsonRpcResponse):
-    error: JsonRpcError
+class SetTaskPushNotificationResponse(JSONRPCResponse):
+    result: TaskPushNotificationConfig | None = None
 
 
-# ------------------------------
-# Server → Client Notifications
-# ------------------------------
-
-class TaskUpdateNotification(BaseModel):
-    jsonrpc: Literal['2.0'] = Field(default='2.0')
-    method: Literal['taskUpdate']
-    params: TaskUpdate
+class GetTaskPushNotificationRequest(JSONRPCRequest):
+    method: Literal['tasks/pushNotification/get',] = (
+        'tasks/pushNotification/get'
+    )
+    params: TaskIdParams
 
 
-class TaskArtifactUpdateNotification(BaseModel):
-    jsonrpc: Literal['2.0'] = Field(default='2.0')
-    method: Literal['taskArtifactUpdate']
-    params: TaskArtifactUpdate
+class GetTaskPushNotificationResponse(JSONRPCResponse):
+    result: TaskPushNotificationConfig | None = None
 
 
-# ------------------------------
-# Event Streaming Support
-# ------------------------------
-
-class TaskEvent(BaseModel):
-    taskId: str
-    timestamp: datetime = Field(default_factory=datetime.now)
+class TaskResubscriptionRequest(JSONRPCRequest):
+    method: Literal['tasks/resubscribe',] = 'tasks/resubscribe'
+    params: TaskIdParams
 
 
-class TaskStatusUpdateEvent(TaskEvent):
-    status: TaskStatus
+A2ARequest = TypeAdapter(
+    Annotated[
+        SendTaskRequest
+        | GetTaskRequest
+        | CancelTaskRequest
+        | SetTaskPushNotificationRequest
+        | GetTaskPushNotificationRequest
+        | TaskResubscriptionRequest
+        | SendTaskStreamingRequest,
+        Field(discriminator='method'),
+    ]
+)
+
+## Error types
 
 
-class TaskLogUpdateEvent(TaskEvent):
-    logs: list[str]
+class JSONParseError(JSONRPCError):
+    code: int = -32700
+    message: str = 'Invalid JSON payload'
+    data: Any | None = None
 
 
-class TaskArtifactUpdateEvent(TaskEvent):
-    artifacts: list[Artifact]
+class InvalidRequestError(JSONRPCError):
+    code: int = -32600
+    message: str = 'Request payload validation error'
+    data: Any | None = None
 
 
-class TaskOutputUpdateEvent(TaskEvent):
-    outputs: list[Output]
+class MethodNotFoundError(JSONRPCError):
+    code: int = -32601
+    message: str = 'Method not found'
+    data: None = None
 
 
-# ------------------------------
-# Custom Exceptions
-# ------------------------------
+class InvalidParamsError(JSONRPCError):
+    code: int = -32602
+    message: str = 'Invalid parameters'
+    data: Any | None = None
 
-class TaskNotFoundError(Exception):
-    """Raised when a task is not found."""
-    def __init__(self, message: str = "The requested task was not found."):
-        super().__init__(message)
 
-class TaskNotCancelableError(Exception):
-    """Raised when a task cannot be cancelled."""
-    def __init__(self, message: str = "The task cannot be canceled."):
-        super().__init__(message)
+class InternalError(JSONRPCError):
+    code: int = -32603
+    message: str = 'Internal error'
+    data: Any | None = None
 
-class PushNotificationNotSupportedError(Exception):
-    code = -32000
-    message = "Push notifications are not supported."
 
-class ContentTypeNotSupportedError(Exception):
+class TaskNotFoundError(JSONRPCError):
+    code: int = -32001
+    message: str = 'Task not found'
+    data: None = None
+
+
+class TaskNotCancelableError(JSONRPCError):
+    code: int = -32002
+    message: str = 'Task cannot be canceled'
+    data: None = None
+
+
+class PushNotificationNotSupportedError(JSONRPCError):
+    code: int = -32003
+    message: str = 'Push Notification is not supported'
+    data: None = None
+
+
+class UnsupportedOperationError(JSONRPCError):
+    code: int = -32004
+    message: str = 'This operation is not supported'
+    data: None = None
+
+
+class ContentTypeNotSupportedError(JSONRPCError):
+    code: int = -32005
+    message: str = 'Incompatible content types'
+    data: None = None
+
+
+class AgentProvider(BaseModel):
+    organization: str
+    url: str | None = None
+
+
+class AgentCapabilities(BaseModel):
+    streaming: bool = False
+    pushNotifications: bool = False
+    stateTransitionHistory: bool = False
+
+
+class AgentAuthentication(BaseModel):
+    schemes: list[str]
+    credentials: str | None = None
+
+
+class AgentSkill(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+    tags: list[str] | None = None
+    examples: list[str] | None = None
+    inputModes: list[str] | None = None
+    outputModes: list[str] | None = None
+
+
+class AgentCard(BaseModel):
+    name: str
+    description: str | None = None
+    url: str
+    provider: AgentProvider | None = None
+    version: str
+    documentationUrl: str | None = None
+    capabilities: AgentCapabilities
+    authentication: AgentAuthentication | None = None
+    defaultInputModes: list[str] = ['text']
+    defaultOutputModes: list[str] = ['text']
+    skills: list[AgentSkill]
+
+
+class A2AClientError(Exception):
     pass
 
-class UnsupportedOperationError(Exception):
-    pass
 
-class InternalError(Exception):
-    pass
+class A2AClientHTTPError(A2AClientError):
+    def __init__(self, status_code: int, message: str):
+        self.status_code = status_code
+        self.message = message
+        super().__init__(f'HTTP Error {status_code}: {message}')
 
-# ------------------------------
-# Union/Discriminator Models
-# ------------------------------
 
-# RequestTypes is now cleaner and centralized
-RequestTypes = Annotated[
-    SendTaskRequest
-    | GetTaskRequest
-    | CancelTaskRequest
-    | SetTaskPushNotificationRequest
-    | GetTaskPushNotificationRequest
-    | TaskResubscriptionRequest
-    | SendTaskStreamingRequest,
-    Field(discriminator='method'),
-]
+class A2AClientJSONError(A2AClientError):
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(f'JSON Error: {message}')
 
-# Used for dynamic request parsing
-from pydantic import TypeAdapter
-A2ARequest = TypeAdapter(RequestTypes)
 
-JSONRPCError = JsonRpcError 
+class MissingAPIKeyError(Exception):
+    """Exception for missing API key."""
